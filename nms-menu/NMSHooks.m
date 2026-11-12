@@ -60,14 +60,16 @@ static NSMutableDictionary<NSString *, NSNumber *> *gOriginals = nil;
 
 @implementation NMSHooks
 
-+ (void)load
++ (void)nms_ensureInit
 {
-    gBase = (uint8_t *)_dyld_get_image_header(0);
-    gOriginals = [NSMutableDictionary dictionary];
+    // 延迟初始化：不在 +load / 构造函数里创建 ObjC 对象，避免加载顺序问题
+    if (!gBase) gBase = (uint8_t *)_dyld_get_image_header(0);
+    if (!gOriginals) gOriginals = [NSMutableDictionary dictionary];
 }
 
 + (uint64_t)mainBase
 {
+    [self nms_ensureInit];
     return (uint64_t)gBase;
 }
 
@@ -116,8 +118,13 @@ static NSMutableDictionary<NSString *, NSNumber *> *gOriginals = nil;
 
 + (BOOL)writeCode:(void *)addr value:(uint64_t)value
 {
-    vm_address_t page = (vm_address_t)addr & ~(vm_address_t)(vm_page_size - 1);
-    kern_return_t kr = vm_protect(mach_task_self(), page, vm_page_size, NO,
+    vm_size_t ps = vm_page_size ? vm_page_size : 16384;
+    uintptr_t start = (uintptr_t)addr;
+    uintptr_t first = start & ~(uintptr_t)(ps - 1);
+    uintptr_t last  = (start + 8 - 1) & ~(uintptr_t)(ps - 1);
+    vm_size_t span  = (vm_size_t)(last - first) + ps;
+
+    kern_return_t kr = vm_protect(mach_task_self(), (vm_address_t)first, span, NO,
                                   VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
     if (kr != KERN_SUCCESS) {
         NSLog(@"[NMSMenu] vm_protect(rw) 失败: %d", kr);
@@ -125,7 +132,8 @@ static NSMutableDictionary<NSString *, NSNumber *> *gOriginals = nil;
     }
     memcpy(addr, &value, 8);
     sys_icache_invalidate(addr, 8);
-    vm_protect(mach_task_self(), page, vm_page_size, NO, VM_PROT_READ | VM_PROT_EXECUTE);
+    vm_protect(mach_task_self(), (vm_address_t)first, span, NO,
+               VM_PROT_READ | VM_PROT_EXECUTE);
     return YES;
 }
 
@@ -133,7 +141,8 @@ static NSMutableDictionary<NSString *, NSNumber *> *gOriginals = nil;
 {
     const NMSPatchDef *def = [self defForKey:key];
     if (!def) return NO;
-    if (!gBase) gBase = (uint8_t *)_dyld_get_image_header(0);
+    [self nms_ensureInit];
+    if (!gBase) return NO;
 
     uint8_t *addr = gBase + def->offset;
     uint64_t cur = 0;
