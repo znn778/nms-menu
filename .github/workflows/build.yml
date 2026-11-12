@@ -5,43 +5,46 @@ on:
   push:
     paths:
       - 'nms-menu/**'
+      - '.github/workflows/build.yml'
 
 jobs:
   build:
-    runs-on: macos-14
-    defaults:
-      run:
-        working-directory: nms-menu
+    # macOS runner 需要计费额度，这里走 Linux + clang + lld 直编
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装工具链
+      - name: 安装 clang / lld
         run: |
-          brew install ldid dpkg xz make || true
-          export THEOS="$RUNNER_TEMP/theos"
-          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
-          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
-          echo "$THEOS/bin" >> "$GITHUB_PATH"
-          "$THEOS/bin/dm.pl" --version || true
+          sudo apt-get update
+          sudo apt-get install -y clang lld git curl xz-utils libssl-dev
+          clang --version
+          ld64.lld --version || true
 
-      - name: 编译
+      - name: 安装 ldid（可选，失败不阻塞）
         run: |
-          make clean
-          make package FINALPACKAGE=1 DEBUG=0
+          sudo apt-get install -y ldid || echo "ldid 不可用，产物保持未签名"
 
-      - name: 解出 dylib
+      - name: 拉取 iOS SDK
         run: |
-          mkdir -p dist
-          for f in packages/*.deb; do dpkg-deb -x "$f" dist; done
-          find dist -name 'NMSMenu.dylib' -exec cp {} ./NMSMenu.dylib \;
+          git clone --depth 1 https://github.com/theos/sdks.git /tmp/sdks
+          ls /tmp/sdks | grep iPhoneOS
+
+      - name: 编译 dylib
+        run: |
+          cd nms-menu
+          chmod +x build.sh
+          SDK=$(ls -d /tmp/sdks/iPhoneOS*.sdk | sort -V | tail -1)
+          ./build.sh "$SDK"
+
+      - name: 校验产物
+        run: |
+          cd nms-menu
           ls -la NMSMenu.dylib
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: NMSMenu-deb
-          path: nms-menu/packages/*.deb
+          python3 ../tools/macho_lc.py NMSMenu.dylib
 
       - uses: actions/upload-artifact@v4
         with:
           name: NMSMenu-dylib
           path: nms-menu/NMSMenu.dylib
+          if-no-files-found: error
