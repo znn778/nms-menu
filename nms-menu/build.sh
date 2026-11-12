@@ -24,6 +24,7 @@ SRC=(
     NMSCheatEngine.m
     NMSSaveTool.m
     NMSMenuWindow.m
+    NMSHooks.m
     Tweak.m
 )
 
