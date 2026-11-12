@@ -24,6 +24,7 @@ import zipfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import patch_macho as pm
 import macho_inject as mi
+import patch_binary as pb
 
 MAIN_EXE = "Payload/No Man's Sky.app/No Man's Sky"
 DEFAULT_DROPS = ["Myiosgods.dylib", "libnomanssky.dylib", "iGameGod.framework"]
@@ -42,13 +43,36 @@ def build_filters(a):
     return list(dict.fromkeys(drops)), list(dict.fromkeys(weaken))
 
 
-def should_skip(name, drops):
+def should_skip(name, drops, strip_scinfo=False):
     if "/_CodeSignature/" in name:
         return True, "旧签名"
+    if strip_scinfo and "/SC_Info/" in name:
+        return True, "FairPlay 残留"
     for d in drops:
         if d and d in name:
             return True, d
     return False, None
+
+
+def bake_patches(buf, keys):
+    """把代码补丁直接写进主二进制，返回 (成功数, 失败列表)"""
+    ok, bad = 0, []
+    for key, title, off, patch, expect in pb.PATCHES:
+        if keys and key not in keys:
+            continue
+        cur = struct.unpack_from("<Q", buf, off)[0]
+        if cur == patch:
+            ok += 1
+            print(f"    = {key:9} 已是补丁状态")
+            continue
+        if cur != expect:
+            bad.append(key)
+            print(f"    X {key:9} 原始字节不匹配 (实际 {cur:016x} 期望 {expect:016x})，跳过")
+            continue
+        struct.pack_into("<Q", buf, off, patch)
+        ok += 1
+        print(f"    + {key:9} {expect:016x} -> {patch:016x}  {title}")
+    return ok, bad
 
 
 def weaken_lcs(buf, patterns):
@@ -74,6 +98,11 @@ def main():
     ap.add_argument("--keep-iosgods", action="store_true", help="保留 libnomanssky / iGameGod")
     ap.add_argument("--drop-igg", action="store_true", help="只额外处理 iGameGod（兼容旧参数）")
     ap.add_argument("--inject-dylib", help="把编译好的 .dylib 注入 Frameworks/ 并加 LC")
+    ap.add_argument("--patch-binary", nargs="?", const="all", default=None,
+                    help="把代码补丁烧进主二进制，可写 all 或 key 列表(逗号分隔)")
+    ap.add_argument("--strip-scinfo", action="store_true", default=True,
+                    help="删除 SC_Info（FairPlay 残留，重签前应清掉）")
+    ap.add_argument("--keep-scinfo", dest="strip_scinfo", action="store_false")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -96,7 +125,7 @@ def main():
 
         skipped, total = [], 0
         for i in infos:
-            skip, why = should_skip(i.filename, drops)
+            skip, why = should_skip(i.filename, drops, a.strip_scinfo)
             if skip:
                 skipped.append((i.filename, i.file_size, why))
             total += i.file_size
@@ -113,6 +142,15 @@ def main():
         n = weaken_lcs(main_data, weaken)
         print(f"\n主二进制: 弱化 {n} 条 LC_LOAD_DYLIB")
 
+        if a.patch_binary:
+            keys = None if a.patch_binary == "all" else {
+                s.strip() for s in a.patch_binary.split(",") if s.strip()}
+            print("\n主二进制: 烧入代码补丁")
+            okc, bad = bake_patches(main_data, keys)
+            print(f"  成功 {okc} 处" + (f"，失败 {bad}" if bad else ""))
+            if bad:
+                print("  警告：有补丁点不匹配，已跳过（不影响启动）")
+
         if a.inject_dylib:
             name = os.path.basename(a.inject_dylib)
             lc = f"@executable_path/Frameworks/{name}"
@@ -126,7 +164,7 @@ def main():
         tmp = a.dst + ".part"
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as out:
             for i in infos:
-                skip, _ = should_skip(i.filename, drops)
+                skip, _ = should_skip(i.filename, drops, a.strip_scinfo)
                 if skip:
                     continue
                 if i.filename == MAIN_EXE:
