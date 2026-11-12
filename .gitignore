@@ -1,0 +1,11 @@
+# 大文件与产物，绝不进仓库
+out/
+artifacts/
+test/
+*.ipa
+*.deb
+*.dylib
+*.bak
+.packages/
+nms-menu/.theos/
+.DS_Store
