@@ -43,14 +43,26 @@ jobs:
       - name: 校验产物
         run: |
           cd nms-menu
-          ls -la NMSMenu.dylib
-          python3 ../tools/macho_lc.py NMSMenu.dylib
-          echo "--- 必须看到 LC_CODE_SIGNATURE ---"
-          python3 ../tools/macho_lc.py NMSMenu.dylib | grep -q LC_CODE_SIGNATURE \
-            && echo "签名 OK" || (echo "缺少代码签名！" && exit 1)
+          ls -la *.dylib
+          for f in NMSMenu.dylib stub_libnomanssky.dylib stub_iGameGod.dylib; do
+            echo "===== $f ====="
+            python3 ../tools/macho_lc.py "$f"
+            python3 ../tools/macho_lc.py "$f" | grep -q LC_CODE_SIGNATURE \
+              && echo "签名 OK: $f" || (echo "缺少代码签名: $f" && exit 1)
+            python3 ../tools/macho_lc.py "$f" | grep -q "LC_ID_DYLIB" \
+              && echo "有 ID: $f" || (echo "缺少 LC_ID_DYLIB: $f" && exit 1)
+          done
 
       - uses: actions/upload-artifact@v4
         with:
           name: NMSMenu-dylib
           path: nms-menu/NMSMenu.dylib
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NMS-stubs
+          path: |
+            nms-menu/stub_libnomanssky.dylib
+            nms-menu/stub_iGameGod.dylib
           if-no-files-found: error
