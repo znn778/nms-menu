@@ -21,9 +21,12 @@ jobs:
           clang --version
           ld64.lld --version || true
 
-      - name: 安装 ldid（可选，失败不阻塞）
+      - name: 安装 ldid（下载官方 Linux 构建）
         run: |
-          sudo apt-get install -y ldid || echo "ldid 不可用，产物保持未签名"
+          sudo curl -sL -o /usr/local/bin/ldid \
+            https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_x86_64
+          sudo chmod +x /usr/local/bin/ldid
+          ldid -h 2>&1 | head -3 || true
 
       - name: 拉取 iOS SDK
         run: |
@@ -42,6 +45,9 @@ jobs:
           cd nms-menu
           ls -la NMSMenu.dylib
           python3 ../tools/macho_lc.py NMSMenu.dylib
+          echo "--- 必须看到 LC_CODE_SIGNATURE ---"
+          python3 ../tools/macho_lc.py NMSMenu.dylib | grep -q LC_CODE_SIGNATURE \
+            && echo "签名 OK" || (echo "缺少代码签名！" && exit 1)
 
       - uses: actions/upload-artifact@v4
         with:
