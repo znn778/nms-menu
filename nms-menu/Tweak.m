@@ -3,6 +3,7 @@
 
 #import "NMSMenuWindow.h"
 #import "NMSPrefs.h"
+#import "NMSHooks.h"
 
 // ---------------------------------------------------------------------------
 // 入口：不依赖 Logos / substrate，纯 runtime 实现，可用 clang 直编。
@@ -44,6 +45,9 @@ static void nms_menu_init(void)
         if (m2) {
             orig_willResignActive = method_setImplementation(m2, (IMP)nms_willResignActive);
         }
+
+        // 恢复上次开启的代码补丁（补丁直接改主程序机器码，加载时就能打）
+        [NMSHooks restoreAll];
 
         // 启动完成后延迟 2 秒挂悬浮窗，避开引擎初始化阶段
         [[NSNotificationCenter defaultCenter]
