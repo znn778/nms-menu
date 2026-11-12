@@ -1,0 +1,9 @@
+Package: com.seagull.nmsmenu
+Name: NMS Menu
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: 无人深空 iOS 悬浮窗作弊菜单（数值扫描/存档修改/防后台暂停）
+Maintainer: seagull
+Author: seagull
+Section: Tweaks
+Depends: mobilesubstrate
