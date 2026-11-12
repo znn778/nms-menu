@@ -58,15 +58,23 @@ def build_filters(a):
 def build_replacements(a):
     """返回 {包内路径: 本地文件} """
     rep = {}
-    if not a.neutralize_iosgods:
-        return rep
-    d = a.stub_dir
-    for arc, fname in NEUTRALIZE_MAP.items():
-        p = os.path.join(d, fname)
-        if not os.path.exists(p):
-            print(f"找不到空壳: {p}")
+    if a.neutralize_iosgods:
+        d = a.stub_dir
+        for arc, fname in NEUTRALIZE_MAP.items():
+            p = os.path.join(d, fname)
+            if not os.path.exists(p):
+                print(f"找不到空壳: {p}")
+                sys.exit(1)
+            rep[arc] = p
+    for spec in (a.replace or []):
+        if "=" not in spec:
+            print(f"--replace 格式错误: {spec}")
             sys.exit(1)
-        rep[arc] = p
+        arc, local = spec.split("=", 1)
+        if not os.path.exists(local):
+            print(f"找不到文件: {local}")
+            sys.exit(1)
+        rep[arc] = local
     return rep
 
 
@@ -129,6 +137,8 @@ def main():
                     help="把代码补丁烧进主二进制，可写 all 或 key 列表(逗号分隔)")
     ap.add_argument("--neutralize-iosgods", action="store_true",
                     help="换壳模式：两个硬链接库替换为空壳，主二进制零改动")
+    ap.add_argument("--replace", action="append", default=[],
+                    help="额外替换，格式 包内路径=本地文件，可重复")
     ap.add_argument("--stub-dir", default="dist", help="空壳 dylib 所在目录（默认 dist）")
     ap.add_argument("--strip-scinfo", action="store_true", default=True,
                     help="删除 SC_Info（FairPlay 残留，重签前应清掉）")
