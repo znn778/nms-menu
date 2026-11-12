@@ -6,7 +6,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = NMSMenu
 
-NMSMenu_FILES = Tweak.xm NMSPrefs.m NMSCheatEngine.m NMSSaveTool.m NMSMenuWindow.m
+NMSMenu_FILES = Tweak.m NMSPrefs.m NMSCheatEngine.m NMSSaveTool.m NMSMenuWindow.m
 NMSMenu_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 NMSMenu_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore
 NMSMenu_LIBRARIES = z
