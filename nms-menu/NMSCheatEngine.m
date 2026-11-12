@@ -1,6 +1,5 @@
 #import "NMSCheatEngine.h"
 #import <mach/mach.h>
-#import <mach/mach_vm.h>
 #import <mach/vm_region.h>
 
 // 单段最多扫 64MB，总量最多 2GB，避免卡死
@@ -71,8 +70,8 @@ static BOOL nms_write32(uint64_t addr, int32_t value)
 /// 遍历本进程所有可读可写的私有段
 static void nms_enumerate_rw(void (^block)(uint64_t addr, uint64_t size))
 {
-    mach_vm_address_t address = 0;
-    mach_vm_size_t size = 0;
+    vm_address_t address = 0;
+    vm_size_t size = 0;
     natural_t depth = 0;
 
     while (YES) {
