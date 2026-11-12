@@ -2,6 +2,7 @@
 #import "NMSCheatEngine.h"
 #import "NMSSaveTool.h"
 #import "NMSPrefs.h"
+#import "NMSHooks.h"
 #import <QuartzCore/QuartzCore.h>
 #import <mach/mach.h>
 #import <stdlib.h>
@@ -181,7 +182,7 @@
     return s;
 }
 
-- (UIView *)switchRow:(NSString *)title on:(BOOL)on action:(SEL)sel
+- (UIView *)switchRow:(NSString *)title key:(NSString *)key on:(BOOL)on action:(SEL)sel
 {
     UIView *c = [UIView new];
     UILabel *l = [UILabel new];
@@ -191,6 +192,7 @@
     l.translatesAutoresizingMaskIntoConstraints = NO;
     UISwitch *sw = [UISwitch new];
     sw.on = on;
+    if (key) sw.accessibilityIdentifier = key;
     sw.transform = CGAffineTransformMakeScale(0.72, 0.72);
     sw.translatesAutoresizingMaskIntoConstraints = NO;
     [sw addTarget:self action:sel forControlEvents:UIControlEventValueChanged];
@@ -315,21 +317,30 @@
 
     // ---- 开关 ----
     [stack addArrangedSubview:[self headerLabel:@"开关"]];
-    [stack addArrangedSubview:[self switchRow:@"后台不暂停"
+    [stack addArrangedSubview:[self switchRow:@"后台不暂停" key:nil
                                           on:[NMSPrefs noPause]
                                       action:@selector(onNoPause:)]];
-    [stack addArrangedSubview:[self switchRow:@"显示 FPS"
+    [stack addArrangedSubview:[self switchRow:@"显示 FPS" key:nil
                                           on:[NMSPrefs showFPS]
                                       action:@selector(onShowFPS:)]];
     self.freezeSwitch = [UISwitch new];
     {
-        UIView *c = [self switchRow:@"锁定数值（每 100ms 回写）"
+        UIView *c = [self switchRow:@"锁定数值（每 100ms 回写）" key:nil
                                  on:[[NMSCheatEngine shared] frozen]
                              action:@selector(onFreeze:)];
         for (UIView *v in c.subviews) {
             if ([v isKindOfClass:[UISwitch class]]) self.freezeSwitch = (UISwitch *)v;
         }
         [stack addArrangedSubview:c];
+    }
+
+    // ---- 代码补丁 ----
+    [stack addArrangedSubview:[self headerLabel:@"代码补丁"]];
+    for (NSDictionary *p in [NMSHooks allPatches]) {
+        [stack addArrangedSubview:[self switchRow:p[@"title"]
+                                             key:p[@"key"]
+                                              on:[p[@"enabled"] boolValue]
+                                          action:@selector(onPatch:)]];
     }
 
     // ---- 信息 ----
@@ -588,6 +599,17 @@
     [[NMSCheatEngine shared] setFreeze:sw.isOn value:[self inputValue]];
     [NMSPrefs setFreeze:sw.isOn];
     [self flash:sw.isOn ? @"已锁定当前候选值" : @"已解除锁定"];
+}
+
+- (void)onPatch:(UISwitch *)sw
+{
+    NSString *key = sw.accessibilityIdentifier;
+    BOOL ok = [NMSHooks setPatch:key enabled:sw.isOn];
+    if (!ok) {
+        sw.on = !sw.isOn;
+        [self alert:@"补丁失败"
+                msg:@"原始字节校验不通过。游戏版本可能不是 7.13，已自动回滚。"];
+    }
 }
 
 - (void)refreshStat
