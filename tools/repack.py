@@ -27,13 +27,25 @@ import macho_inject as mi
 import patch_binary as pb
 
 MAIN_EXE = "Payload/No Man's Sky.app/No Man's Sky"
+APP = "Payload/No Man's Sky.app"
 DEFAULT_DROPS = ["Myiosgods.dylib", "libnomanssky.dylib", "iGameGod.framework"]
 DEFAULT_WEAKEN = ["Myiosgods", "libnomanssky", "iGameGod"]
+
+# 「换壳」模式下被替换成空壳的文件
+NEUTRALIZE_MAP = {
+    f"{APP}/Frameworks/libnomanssky.dylib": "stub_libnomanssky.dylib",
+    f"{APP}/Frameworks/iGameGod.framework/iGameGod": "stub_iGameGod.dylib",
+}
 
 
 def build_filters(a):
     drops = list(a.drop or [])
     weaken = list(a.weaken or [])
+    if a.neutralize_iosgods:
+        # 换壳模式：只删弹窗库（本来就是 weak 链接），两个硬链接库用空壳顶替，
+        # 主二进制一个字节都不改
+        drops.append("Myiosgods.dylib")
+        return list(dict.fromkeys(drops)), []
     if not a.keep_iosgods:
         drops += DEFAULT_DROPS
         weaken += DEFAULT_WEAKEN
@@ -41,6 +53,21 @@ def build_filters(a):
         drops.append("iGameGod.framework")
         weaken.append("iGameGod")
     return list(dict.fromkeys(drops)), list(dict.fromkeys(weaken))
+
+
+def build_replacements(a):
+    """返回 {包内路径: 本地文件} """
+    rep = {}
+    if not a.neutralize_iosgods:
+        return rep
+    d = a.stub_dir
+    for arc, fname in NEUTRALIZE_MAP.items():
+        p = os.path.join(d, fname)
+        if not os.path.exists(p):
+            print(f"找不到空壳: {p}")
+            sys.exit(1)
+        rep[arc] = p
+    return rep
 
 
 def should_skip(name, drops, strip_scinfo=False):
@@ -100,6 +127,9 @@ def main():
     ap.add_argument("--inject-dylib", help="把编译好的 .dylib 注入 Frameworks/ 并加 LC")
     ap.add_argument("--patch-binary", nargs="?", const="all", default=None,
                     help="把代码补丁烧进主二进制，可写 all 或 key 列表(逗号分隔)")
+    ap.add_argument("--neutralize-iosgods", action="store_true",
+                    help="换壳模式：两个硬链接库替换为空壳，主二进制零改动")
+    ap.add_argument("--stub-dir", default="dist", help="空壳 dylib 所在目录（默认 dist）")
     ap.add_argument("--strip-scinfo", action="store_true", default=True,
                     help="删除 SC_Info（FairPlay 残留，重签前应清掉）")
     ap.add_argument("--keep-scinfo", dest="strip_scinfo", action="store_false")
@@ -114,8 +144,13 @@ def main():
         return 1
 
     drops, weaken = build_filters(a)
+    reps = build_replacements(a)
     print("剔除规则:", drops)
-    print("弱化规则:", weaken)
+    print("弱化规则:", weaken or "(不改主二进制)")
+    if reps:
+        print("替换为空壳:")
+        for k, v in reps.items():
+            print(f"   {k}  <-  {v} ({os.path.getsize(v):,} B)")
 
     with zipfile.ZipFile(a.src) as z:
         infos = z.infolist()
@@ -139,8 +174,11 @@ def main():
             return 0
 
         main_data = bytearray(z.read(MAIN_EXE))
-        n = weaken_lcs(main_data, weaken)
-        print(f"\n主二进制: 弱化 {n} 条 LC_LOAD_DYLIB")
+        touched = False
+        if weaken:
+            n = weaken_lcs(main_data, weaken)
+            print(f"\n主二进制: 弱化 {n} 条 LC_LOAD_DYLIB")
+            touched = True
 
         if a.patch_binary:
             keys = None if a.patch_binary == "all" else {
@@ -150,6 +188,7 @@ def main():
             print(f"  成功 {okc} 处" + (f"，失败 {bad}" if bad else ""))
             if bad:
                 print("  警告：有补丁点不匹配，已跳过（不影响启动）")
+            touched = True
 
         if a.inject_dylib:
             name = os.path.basename(a.inject_dylib)
@@ -160,6 +199,10 @@ def main():
                 print(f"注入 LC [{label}]: {msg}")
                 if not ok:
                     return 1
+            touched = True
+
+        if not touched:
+            print("\n主二进制: 逐字节保持原样（零改动）")
 
         tmp = a.dst + ".part"
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as out:
@@ -172,6 +215,13 @@ def main():
                     zi.external_attr = i.external_attr
                     zi.compress_type = zipfile.ZIP_DEFLATED
                     out.writestr(zi, bytes(main_data))
+                elif i.filename in reps:
+                    zi = zipfile.ZipInfo(i.filename, date_time=i.date_time)
+                    zi.external_attr = i.external_attr
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    with open(reps[i.filename], "rb") as f:
+                        out.writestr(zi, f.read())
+                    print(f"换壳: {i.filename}  ({i.file_size:,} -> {os.path.getsize(reps[i.filename]):,} B)")
                 else:
                     zi = zipfile.ZipInfo(i.filename, date_time=i.date_time)
                     zi.external_attr = i.external_attr
@@ -184,7 +234,7 @@ def main():
                                 break
                             dst.write(chunk)
             if a.inject_dylib:
-                arc = f"Payload/No Man's Sky.app/Frameworks/{os.path.basename(a.inject_dylib)}"
+                arc = f"{APP}/Frameworks/{os.path.basename(a.inject_dylib)}"
                 out.write(a.inject_dylib, arcname=arc)
                 print(f"已放入 {arc}")
 
