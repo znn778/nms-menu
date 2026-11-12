@@ -1,0 +1,47 @@
+name: Build NMSMenu
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'nms-menu/**'
+
+jobs:
+  build:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: nms-menu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装工具链
+        run: |
+          brew install ldid dpkg xz make || true
+          export THEOS="$RUNNER_TEMP/theos"
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+          "$THEOS/bin/dm.pl" --version || true
+
+      - name: 编译
+        run: |
+          make clean
+          make package FINALPACKAGE=1 DEBUG=0
+
+      - name: 解出 dylib
+        run: |
+          mkdir -p dist
+          for f in packages/*.deb; do dpkg-deb -x "$f" dist; done
+          find dist -name 'NMSMenu.dylib' -exec cp {} ./NMSMenu.dylib \;
+          ls -la NMSMenu.dylib
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NMSMenu-deb
+          path: nms-menu/packages/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NMSMenu-dylib
+          path: nms-menu/NMSMenu.dylib
